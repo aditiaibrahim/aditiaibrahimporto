@@ -2,7 +2,7 @@
 <html lang="id">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Aditia Ibrahim — Game Developer</title>
 <style>
   *{margin:0;padding:0;box-sizing:border-box}
@@ -85,6 +85,34 @@
   .inv-key{position:absolute;top:2px;left:6px;font-size:10px;font-weight:800;color:#fff;background:#0e7d96;border-radius:6px;padding:0 5px}
   .inv-key:empty{display:none}
   @media(max-width:760px){.tool{width:48px;height:56px}.tool .ico{font-size:22px;height:32px}.tool .ico canvas{width:34px;height:30px}#invGrid{grid-template-columns:repeat(3,1fr)}#hints{display:none}}
+  /* === Portrait / HP: UI otomatis menyesuaikan agar tidak rusak === */
+  canvas#game{touch-action:none}
+  @media (orientation:portrait),(max-width:600px){
+    #brand{display:none}
+    #hudBtn{top:10px;left:10px}
+    .pill{padding:6px 9px;font-size:12px}
+    #topright{top:10px;right:10px;left:54px;justify-content:flex-end;flex-wrap:wrap;gap:6px}
+    #dayPill{order:-1}
+    #toolbarWrap{bottom:calc(10px + env(safe-area-inset-bottom));width:100%;gap:6px;align-items:center}
+    #toolbar{flex-wrap:nowrap;justify-content:flex-start;overflow-x:auto;overflow-y:hidden;max-width:94vw;padding:6px 8px;gap:4px;border-radius:16px;scrollbar-width:none;-webkit-overflow-scrolling:touch;scroll-snap-type:x proximity}
+    #toolbar::-webkit-scrollbar{display:none}
+    .tool{flex:0 0 auto;width:52px;height:56px;scroll-snap-align:center}
+    .tool .ico{height:34px}
+    .tool .lbl{font-size:10px}
+    .tool .key{display:none}
+    #hints{display:none}
+    #toast{max-width:90vw;white-space:normal;text-align:center;top:70px}
+    #paintModal{bottom:auto;top:50%;transform:translate(-50%,-50%)}
+    #diarySpread{flex-direction:column}
+    #diaryLeft,#diaryRight{height:150px}
+    #diaryModal{padding:16px 18px}
+    #invModal{max-height:62vh}
+    #diaryNav{bottom:calc(110px + env(safe-area-inset-bottom))}
+  }
+  @media (max-width:380px){
+    .tool{flex:0 0 auto;width:48px;height:54px}
+    #topright{left:50px}
+  }
 </style>
 </head>
 <body>
@@ -112,7 +140,7 @@
 <div id="diaryNav" class="card"><span class="pill" id="sheetPrev" title="Lembar sebelumnya">◀</span><span id="diaryCount"></span><span class="pill" id="sheetNext" title="Lembar berikutnya">▶</span></div>
 <div id="toolbarWrap">
   <div id="toolbar"></div>
-  <div id="hints"><span><b>Click</b> bangun</span><span><b>Drag</b> paint road/path/tree</span><span><b>Right-click</b> remove</span><span><b>I</b> inventori</span><span><b>D</b> diary</span><span><b>F</b> portfolio</span><span><b>H</b> sembunyi HUD</span><span><b>Space</b> fast time</span></div>
+  <div id="hints"><span><b>Click</b> bangun</span><span><b>Drag</b> paint road/path/tree</span><span><b>Right-click</b> remove</span><span><b>Pinch/wheel</b> zoom</span><span><b>Double-click</b> reset</span><span><b>I</b> inventori</span><span><b>D</b> diary</span><span><b>F</b> portfolio</span><span><b>H</b> sembunyi HUD</span><span><b>Space</b> fast time</span></div>
 </div>
 <div id="invModal" class="card">
   <div class="inv-head"><b>Inventori Bangunan</b><span id="invClose">✕</span></div>
@@ -217,7 +245,8 @@ let villagers=[], smokes=[], rainDrops=[], splashes=[], foams=[], sparkles=[], w
 let lastCott=0, lastPop=0, lastDayH='', denyT=-9;
 let T=0, lastT=0, gloom=0, seedA=0, seedB=0, genFxUntil=-1, flyVis=0, fireVis=1, bflyVis=0;
 let score=0, complete=false, buildCount=0;
-let camX=0, camY=40, scale=1, hover=null, isDown=false, isRight=false;
+let camX=0, camY=40, scale=1, baseScale=1, userZoom=1, panX=0, panY=0, baseCamY=40, hover=null, isDown=false, isRight=false;
+let pinching=false, pinchD0=0, pinchZoom0=1, pinchMid0=null, pinchT0=0, pinchMoved=false;
 let boat={state:'gone', t:9, px:0, py:0, vx:0, dir:1, lane:'back', bob:0, var:0, size:1, off:70};
 let boatPuffs=[];
 let gulls=[]; for(let i=0;i<3;i++) gulls.push({x:Math.random(), y:0.12+Math.random()*0.25, ph:Math.random()*6.28, sp:0.010+Math.random()*0.012});
@@ -234,7 +263,30 @@ for(let i=0;i<14;i++) whitecaps.push({x:Math.random()*1.2,y:Math.random(),ph:Mat
 const canvas=document.getElementById('game'); let ctx=canvas.getContext('2d');
 function resize(){canvas.width=innerWidth*devicePixelRatio;canvas.height=innerHeight*devicePixelRatio;canvas.style.width=innerWidth+'px';canvas.style.height=innerHeight+'px';ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);}
 addEventListener('resize',resize);resize();
-function fit(){ const s=Math.min(innerWidth/900, innerHeight/650); scale=s<0.7?0.7:s>1.15?1.15:s; camY = innerHeight*0.08; }
+function applyZoom(){
+  scale=baseScale*userZoom;
+  const mx=innerWidth*0.45, my=innerHeight*0.35;
+  panX=Math.max(-mx,Math.min(mx,panX));
+  panY=Math.max(-my,Math.min(my,panY));
+  camX=panX; camY=baseCamY+panY;
+}
+function setZoom(z){ userZoom=Math.max(0.6,Math.min(2.8,z)); applyZoom(); }
+function resetZoom(){ userZoom=1; panX=0; panY=0; applyZoom(); }
+function fit(){
+  const portrait=innerHeight>innerWidth;
+  document.body.classList.toggle('portrait',portrait);
+  if(portrait){
+    // portrait: muatkan lebar pulau (768*scale) ke layar + toolbar 1 baris scroll
+    const s=Math.min(innerWidth/800, innerHeight/780);
+    baseScale=s<0.42?0.42:s>1.0?1.0:s;
+    baseCamY=innerHeight*0.02;
+  } else {
+    const s=Math.min(innerWidth/900, innerHeight/650);
+    baseScale=s<0.7?0.7:s>1.15?1.15:s;
+    baseCamY=innerHeight*0.08;
+  }
+  applyZoom();
+}
 fit(); addEventListener('resize',fit);
 
 function hash(x,y){let h=(x*374761393+y*668265263)|0;h=(h^(h>>13))*1274126177;return ((h^(h>>16))>>>0)/4294967295;}
@@ -408,10 +460,11 @@ function islandBand(){
 }
 function pick(mx,my){
   let best=null,bd=1e9;
+  const hitR=Math.max(24,30*scale); // jari di HP butuh area sentuh minimal
   for(let x=0;x<N;x++)for(let y=0;y<N;y++){
     if(!isLand(x,y)) continue; // tidak ada interaksi di air
     const p=iso(x,y); const d=Math.hypot(mx-p.x,my-p.y-10);
-    if(d<30*scale&&d<bd){bd=d;best={x,y,water:false};}
+    if(d<hitR&&d<bd){bd=d;best={x,y,water:false};}
   }
   return best;
 }
@@ -901,6 +954,7 @@ addEventListener('keydown',e=>{
   const map={'x':'remove'}; slots.forEach((id,i)=>map[String(i+1)]=id);
   if(map[e.key]||map[k]){selected=map[e.key]||map[k];refreshTools();if(document.body.classList.contains('hidehud')){const tb=TOOLS.find(t=>t.id===selected);toast('Alat: '+(tb?tb.lbl:selected));}}
   if(k==='n') toggleNight(); if(k==='r') toggleRain(); if(k==='m') toggleSound(); if(k==='h') toggleHUD(); if(k==='i') toggleInventory(); if(k==='d') toggleDiary(); if(k==='f') openFolio('menu');
+  if(e.key==='+'||e.key==='=') setZoom(userZoom*1.12); if(e.key==='-'||e.key==='_') setZoom(userZoom/1.12); if(e.key==='0'){ resetZoom(); toast('🔍 Zoom reset'); }
   if(e.key==='Escape'){ closePaint(); toggleInventory(false); toggleDiary(false); }
 });
 addEventListener('keyup',e=>{if(e.code==='Space')fast=false;});
@@ -912,8 +966,50 @@ canvas.addEventListener('mousemove',e=>{
   if(isDown&&hover&&(selected==='path'||selected==='road'||selected==='tree'||selected==='flowers')&&objects[hover.x][hover.y]?.type!=='coffee') build(hover.x,hover.y,selected);
   if(isRight&&hover&&isLand(hover.x,hover.y)){objects[hover.x][hover.y]=null;updateScore();}
 });
-canvas.addEventListener('touchstart',e=>{const t=e.touches[0];if(boat.state==='sail'&&Math.hypot(t.clientX-boat.px,t.clientY-(boat.py-20*scale))<48*scale){boatGift();return;}if(gullAt(t.clientX,t.clientY)){gullCry();return;}const c=pick(t.clientX,t.clientY);if(c)build(c.x,c.y,selected);},{passive:true});
-canvas.addEventListener('touchmove',e=>{const t=e.touches[0];const c=pick(t.clientX,t.clientY);if(c&&(selected==='path'||selected==='road'||selected==='tree'||selected==='flowers'))build(c.x,c.y,selected);},{passive:true});
+canvas.addEventListener('touchstart',e=>{
+  ensureAudio();
+  if(e.touches.length===2){
+    e.preventDefault();
+    pinching=true; isDown=false;
+    const a=e.touches[0],b=e.touches[1];
+    pinchD0=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);
+    pinchZoom0=userZoom;
+    pinchMid0={x:(a.clientX+b.clientX)/2,y:(a.clientY+b.clientY)/2};
+    pinchT0=performance.now(); pinchMoved=false;
+    return;
+  }
+  if(pinching) return;
+  const t=e.touches[0];if(boat.state==='sail'&&Math.hypot(t.clientX-boat.px,t.clientY-(boat.py-20*scale))<48*scale){boatGift();return;}if(gullAt(t.clientX,t.clientY)){gullCry();return;}const c=pick(t.clientX,t.clientY);if(c)build(c.x,c.y,selected);
+},{passive:false});
+canvas.addEventListener('touchmove',e=>{
+  if(e.touches.length===2){
+    e.preventDefault();
+    const a=e.touches[0],b=e.touches[1];
+    const d=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);
+    const m={x:(a.clientX+b.clientX)/2,y:(a.clientY+b.clientY)/2};
+    if(!pinching||!pinchD0){ pinching=true; isDown=false; pinchD0=d; pinchZoom0=userZoom; pinchMid0=m; pinchT0=performance.now(); pinchMoved=false; return; }
+    if(pinchD0>0){
+      const nz=Math.max(0.6,Math.min(2.8,pinchZoom0*d/pinchD0));
+      if(Math.abs(nz-pinchZoom0)>0.02) pinchMoved=true;
+      userZoom=nz; applyZoom();
+    }
+    if(pinchMid0){ const dx=m.x-pinchMid0.x, dy=m.y-pinchMid0.y; if(Math.hypot(dx,dy)>4) pinchMoved=true; panX+=dx; panY+=dy; applyZoom(); }
+    pinchMid0=m;
+    return;
+  }
+  if(pinching) return;
+  const t=e.touches[0];const c=pick(t.clientX,t.clientY);if(c&&(selected==='path'||selected==='road'||selected==='tree'||selected==='flowers'))build(c.x,c.y,selected);
+},{passive:false});
+canvas.addEventListener('touchend',e=>{
+  if(e.touches.length<2&&pinching){
+    // tap 2 jari cepat tanpa geser = reset zoom
+    const quick=performance.now()-pinchT0<280;
+    if(quick&&!pinchMoved){ resetZoom(); toast('🔍 Zoom reset'); }
+    pinching=false; pinchD0=0; pinchMid0=null;
+  }
+});
+canvas.addEventListener('wheel',e=>{ e.preventDefault(); setZoom(userZoom*Math.exp(-e.deltaY*0.0012)); },{passive:false});
+canvas.addEventListener('dblclick',e=>{ resetZoom(); toast('🔍 Zoom reset'); });
 // audio mulai saat interaksi pertama (aturan autoplay browser)
 addEventListener('pointerdown',()=>{ensureAudio();},{once:true});
 addEventListener('keydown',()=>{ensureAudio();},{once:true});
